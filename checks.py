@@ -74,7 +74,42 @@ def regression():
     assert w.reachable() == [("b", "a"), ("b", "c")]
     w.close()
     locality(cyclic=False)
+    cycle_support_regression()
     print("REGRESSION_OK: diamond, replacement, no-op, validation, cycle edge")
+
+
+def cycle_support_regression():
+    # The incident used to leave dead relations because cyclic propagation
+    # inflated support counts and a single decrement never crossed zero.  Lock
+    # exact distinct-witness counts, real retraction, alternate-path survival
+    # through an SCC, and idempotent repeats.
+    w = Warehouse()
+    try:
+        w.apply(INCIDENT)
+        # Two distinct final-edge witnesses for (raw, stage): E(raw, stage)
+        # directly and E(quality, stage) reached around the stage/quality cycle.
+        assert w.store.support("raw", "stage") == 2
+        w.apply(remove=DISCONNECT)
+        assert w.reachable() == EXPECTED_AFTER
+        # The disconnected source no longer reaches anything; the surviving
+        # cycle keeps its own (self) reachability with exact single supports.
+        assert w.store.support("stage", "stage") == 1
+        assert w.store.support("quality", "quality") == 1
+        snapshot = (w.edges(), w.reachable())
+        for _ in range(3):  # repeated retraction changes nothing
+            w.apply(remove=DISCONNECT)
+            assert (w.edges(), w.reachable()) == snapshot
+        # An alternative path through the same SCC must survive a deletion.
+        w.apply(add=[("raw", "quality")])
+        w.apply(remove=[("raw", "quality")])
+        assert w.reachable() == EXPECTED_AFTER
+        w.apply(add=[("raw", "stage"), ("raw", "quality")])
+        w.apply(remove=[("raw", "stage")])
+        edges = (set(INCIDENT) - {("raw", "stage")}) | {("raw", "quality")}
+        compare(w, edges)
+    finally:
+        w.close()
+    print("CYCLE_SUPPORT_REGRESSION_OK")
 
 
 def reproduce():
